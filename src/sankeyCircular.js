@@ -1,11 +1,28 @@
 /// https://github.com/tomshanley/d3-sankeyCircular-circular
 // fork of https://github.com/d3/d3-sankeyCircular copyright Mike Bostock
 import {ascending, min, max, mean, sum} from "d3-array";
-import {map, nest} from "d3-collection";
-import {justify} from "./align";
-import constant from "./constant";
+import {justify} from "./align.js";
+import constant from "./constant.js";
 import {linkHorizontal} from "d3-shape";
-import findCircuits from "elementary-circuits-directed-graph";
+import findCircuits from "./vendor/elementary-circuits.js";
+
+// d3-collection(구버전 d3, v6에서 제거됨) 제거 — d3 v7 호환 순수 JS 대체.
+// map(nodes, id): id로 키잉한 조회 컬렉션 → 네이티브 Map.
+function mapById (nodes, id) {
+  var m = new Map();
+  nodes.forEach(function (n) { m.set(id(n), n); });
+  return m;
+}
+// nest().key(d.column).sortKeys(ascending).entries(nodes).map(d=>d.values):
+// column별로 노드를 묶어 column 오름차순 배열의 배열로.
+function columnsByKey (nodes) {
+  var m = new Map();
+  nodes.forEach(function (d) {
+    if (!m.has(d.column)) m.set(d.column, []);
+    m.get(d.column).push(d);
+  });
+  return Array.from(m.keys()).sort(ascending).map(function (k) { return m.get(k); });
+}
 
   // return the value of a node or link
   function value (d) {
@@ -127,7 +144,7 @@ import findCircuits from "elementary-circuits-directed-graph";
       }
 
       // 8.1  Fix nodes overlapping after sortNodes
-      resolveNodesOverlap(graph, y0, py)
+      resolveNodesOverlap(graph, y0, py, ascendingBreadth)
 
       // 8.2  Adjust node and link positions back to fill height of chart area if compressed
       fillHeight(graph, y0, y1)
@@ -295,7 +312,7 @@ import findCircuits from "elementary-circuits-directed-graph";
         node.sourceLinks = []
         node.targetLinks = []
       })
-      var nodeById = map(graph.nodes, id)
+      var nodeById = mapById(graph.nodes, id)
       graph.links.forEach(function (link, i) {
         link.index = i
         var source = link.source
@@ -450,15 +467,7 @@ import findCircuits from "elementary-circuits-directed-graph";
 
     // Assign nodes' breadths, and then shift nodes that overlap (resolveCollisions)
     function computeNodeBreadths (graph, iterations, id) {
-      var columns = nest()
-        .key(function (d) {
-          return d.column
-        })
-        .sortKeys(ascending)
-        .entries(graph.nodes)
-        .map(function (d) {
-          return d.values
-        })
+      var columns = columnsByKey(graph.nodes)
 
       initializeNodeBreadth(id)
       resolveCollisions()
@@ -539,25 +548,33 @@ import findCircuits from "elementary-circuits-directed-graph";
 
       // For each node in each column, check the node's vertical position in relation to its targets and sources vertical position
       // and shift up/down to be closer to the vertical middle of those targets and sources
-      function relaxLeftAndRight (alpha) {
+      // upstream(0.34.0) 동작 복원: 순환노드는 이완 제외(initializeNodeBreadth 배치 유지),
+      // 첫/끝 단독컬럼만 중앙정렬, 나머지만 이웃 평균으로 이완. (id 인자 필요 — 호출부에서 전달)
+      function relaxLeftAndRight (alpha, id) {
+        var columnsLength = columns.length
+
         columns.forEach(function (nodes) {
+          var n = nodes.length
+          var depth = nodes[0].depth
+
           nodes.forEach(function (node) {
             // check the node is not an orphan
             var nodeHeight
             if (node.sourceLinks.length || node.targetLinks.length) {
+              if (node.partOfCycle && numberOfNonSelfLinkingCycles(node, id) > 0) {
+                // 순환노드는 움직이지 않는다 (매끄러운 고리 유지)
+              } else if (depth == 0 && n == 1) {
                 nodeHeight = node.y1 - node.y0
                 node.y0 = y1 / 2 - nodeHeight / 2
                 node.y1 = y1 / 2 + nodeHeight / 2
+              } else if (depth == columnsLength - 1 && n == 1) {
+                nodeHeight = node.y1 - node.y0
+                node.y0 = y1 / 2 - nodeHeight / 2
+                node.y1 = y1 / 2 + nodeHeight / 2
+              } else {
                 var avg = 0
-      
-                var avgTargetY = mean(
-                  node.sourceLinks,
-                  linkTargetCenter
-                )
-                var avgSourceY = mean(
-                  node.targetLinks,
-                  linkSourceCenter
-                )
+                var avgTargetY = mean(node.sourceLinks, linkTargetCenter)
+                var avgSourceY = mean(node.targetLinks, linkSourceCenter)
                 if (avgTargetY && avgSourceY) {
                   avg = (avgTargetY + avgSourceY) / 2
                 } else {
@@ -568,6 +585,7 @@ import findCircuits from "elementary-circuits-directed-graph";
                 node.y0 += dy
                 node.y1 += dy
               }
+            }
           })
         })
       }
@@ -1662,16 +1680,10 @@ import findCircuits from "elementary-circuits-directed-graph";
 
   }
 
-  function resolveNodesOverlap(graph, y0, py){
-    var columns = nest()
-      .key(function (d) {
-        return d.column
-      })
-      .sortKeys(ascending)
-      .entries(graph.nodes)
-      .map(function (d) {
-        return d.values
-      })
+  // ascendingBreadth: 팩토리 클로저 지역함수(nodeSort 참조)라 인자로 주입받는다.
+  // (번들러는 스코프를 평탄화해 이 참조가 통했으나, 순수 ESM에선 명시 전달 필요 — upstream 잠복버그 교정)
+  function resolveNodesOverlap(graph, y0, py, ascendingBreadth){
+    var columns = columnsByKey(graph.nodes)
 
       columns.forEach(function (nodes) {
         var node, dy, y = y0, n = nodes.length, i
