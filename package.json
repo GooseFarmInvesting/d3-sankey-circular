@@ -8,14 +8,14 @@
     "type": "git",
     "url": "git+https://github.com/tomshanley/d3-sankey-circular.git"
   },
-  "main": "dist/d3-sankey-circular.js",
-  "module": "dist/d3-sankey-circular.es.js",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
   "dependencies": {
-    "d3-array": "^1.2.1",
-    "d3-collection": "^1.0.4",
-    "d3-shape": "^1.2.0",
-    "elementary-circuits-directed-graph": "^1.0.4"
+    "d3-array": "^3.2.4",
+    "d3-shape": "^3.2.0"
   },
+  "vendored": "src/vendor/{elementary-circuits,scc}.js — 각 MIT, upstream 대체. LICENSE 참조.",
   "devDependencies": {
     "babel-cli": "^6.26.0",
     "babel-plugin-external-helpers": "^6.22.0",

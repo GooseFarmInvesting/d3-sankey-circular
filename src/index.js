@@ -7,4 +7,4 @@ export {
   left as sankeyLeft,
   right as sankeyRight,
   justify as sankeyJustify,
-} from "./align";
+} from "./align.js";
